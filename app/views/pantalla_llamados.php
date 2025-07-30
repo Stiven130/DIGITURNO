@@ -7,7 +7,7 @@ if (file_exists($db_path)) {
     die("<div class='alert alert-danger'>Error: Archivo de configuración no encontrado</div>");
 }
 
-if (!isset($conn) || !$conn) {
+if (!isset($conn) || $conn->connect_error) {
     die("<div class='alert alert-danger'>Error de conexión a la base de datos</div>");
 }
 
@@ -20,15 +20,13 @@ $query = "SELECT t.id, t.cedula, e.nombre AS especialidad, e.id as especialidad_
           ORDER BY t.fecha_hora DESC LIMIT 5";
 $result = mysqli_query($conn, $query);
 
-// Obtener estadísticas (adaptado para tu estructura de BD)
-$stats_query = "SELECT 
-                COUNT(CASE WHEN estado = 'pendiente' THEN 1 END) as pendientes,
-                COUNT(CASE WHEN estado = 'llamado' THEN 1 END) as llamados,
-                COUNT(CASE WHEN estado = 'atendido' THEN 1 END) as atendidos,
-                AVG(TIMESTAMPDIFF(MINUTE, fecha_hora, NOW())) as espera_promedio
-                FROM turnos";
-$stats_result = mysqli_query($conn, $stats_query);
-$stats = mysqli_fetch_assoc($stats_result);
+// Obtener el último turno llamado para el sistema de actualización
+$current_ticket = mysqli_num_rows($result) > 0 ? mysqli_fetch_assoc($result) : null;
+
+// Definir rutas base correctamente (ajustadas a tu estructura)
+$base_url = 'http://' . $_SERVER['HTTP_HOST'] . '/digiturnos/';
+$assets_url = $base_url . 'public/assets/';
+$check_tickets_url = $base_url . 'app/views/check_new_tickets.php';
 ?>
 
 <!DOCTYPE html>
@@ -42,13 +40,11 @@ $stats = mysqli_fetch_assoc($stats_result);
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         :root {
-            --primary-color: #1a2a6c;
-            --secondary-color: #b21f1f;
-            --accent-color: #fdbb2d;
+            --primary-color: #4f9993;
+            --secondary-color: #65878b;
+            --accent-color: #0e1418;
             --text-light: #ffffff;
-            --text-dark: #333333;
             --bg-dark: #121212;
-            --bg-light: #f8f9fa;
         }
         
         body {
@@ -62,8 +58,6 @@ $stats = mysqli_fetch_assoc($stats_result);
             background: linear-gradient(135deg, var(--primary-color), var(--secondary-color), var(--accent-color));
             padding: 15px 0;
             box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-            position: relative;
-            z-index: 100;
         }
         
         .logo {
@@ -71,24 +65,15 @@ $stats = mysqli_fetch_assoc($stats_result);
             transition: all 0.3s ease;
         }
         
-        .logo:hover {
-            transform: scale(1.05);
-        }
-        
         .digital-clock {
             font-size: 2.5rem;
             font-weight: 700;
             text-shadow: 0 0 10px rgba(0,0,0,0.5);
-            line-height: 1;
         }
         
         .current-date {
             font-size: 1.2rem;
             opacity: 0.9;
-        }
-        
-        .main-container {
-            padding: 20px 0;
         }
         
         .current-ticket {
@@ -97,20 +82,12 @@ $stats = mysqli_fetch_assoc($stats_result);
             padding: 25px;
             margin-bottom: 30px;
             border-left: 8px solid var(--accent-color);
-            transition: all 0.5s ease;
             box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-        }
-        
-        .current-ticket h2 {
-            color: var(--accent-color);
-            margin-bottom: 15px;
-            font-weight: 700;
         }
         
         .ticket-number {
             font-size: 5rem;
             font-weight: 900;
-            line-height: 1;
             color: var(--text-light);
             text-shadow: 0 0 15px rgba(255,255,255,0.3);
             margin: 20px 0;
@@ -119,15 +96,6 @@ $stats = mysqli_fetch_assoc($stats_result);
         .ticket-specialty {
             font-size: 2rem;
             font-weight: 600;
-            color: var(--text-light);
-        }
-        
-        .next-tickets-title {
-            font-size: 1.8rem;
-            margin-bottom: 20px;
-            padding-bottom: 10px;
-            border-bottom: 2px solid var(--accent-color);
-            display: inline-block;
         }
         
         .ticket-card {
@@ -135,46 +103,7 @@ $stats = mysqli_fetch_assoc($stats_result);
             border-radius: 10px;
             padding: 15px;
             margin-bottom: 15px;
-            transition: all 0.3s ease;
             border-left: 4px solid;
-            height: 100%;
-        }
-        
-        .ticket-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 8px 25px rgba(0,0,0,0.3);
-        }
-        
-        .ticket-card .ticket-id {
-            font-size: 1.8rem;
-            font-weight: 700;
-            margin-bottom: 5px;
-        }
-        
-        .ticket-card .ticket-specialty {
-            font-size: 1.2rem;
-            opacity: 0.9;
-        }
-        
-        .stats-card {
-            background: rgba(255,255,255,0.05);
-            border-radius: 10px;
-            padding: 15px;
-            margin-bottom: 20px;
-            text-align: center;
-        }
-        
-        .stats-card .stats-value {
-            font-size: 2.5rem;
-            font-weight: 700;
-            color: var(--accent-color);
-        }
-        
-        .stats-card .stats-label {
-            font-size: 1rem;
-            opacity: 0.8;
-            text-transform: uppercase;
-            letter-spacing: 1px;
         }
         
         .video-container {
@@ -184,27 +113,14 @@ $stats = mysqli_fetch_assoc($stats_result);
             margin-top: 30px;
         }
         
-        .alert-notification {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            z-index: 1000;
-            animation: slideIn 0.5s forwards;
-            max-width: 400px;
-        }
-        
-        @keyframes slideIn {
-            from { transform: translateX(100%); }
-            to { transform: translateX(0); }
-        }
-        
+        /* Animaciones */
         @keyframes pulse {
-            0% { box-shadow: 0 0 0 0 rgba(253, 187, 45, 0.7); }
-            70% { box-shadow: 0 0 0 15px rgba(253, 187, 45, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(253, 187, 45, 0); }
+            0% { transform: scale(1); }
+            50% { transform: scale(1.02); }
+            100% { transform: scale(1); }
         }
         
-        .pulse-effect {
+        .pulse-animation {
             animation: pulse 2s infinite;
         }
         
@@ -215,19 +131,18 @@ $stats = mysqli_fetch_assoc($stats_result);
         .specialty-4 { border-color: #E74C3C; }
         .specialty-5 { border-color: #9B59B6; }
         
-        /* Responsive */
         @media (max-width: 768px) {
-            .ticket-number {
-                font-size: 3.5rem;
-            }
-            
-            .ticket-specialty {
-                font-size: 1.5rem;
-            }
-            
-            .digital-clock {
-                font-size: 2rem;
-            }
+            .ticket-number { font-size: 3.5rem; }
+            .ticket-specialty { font-size: 1.5rem; }
+            .digital-clock { font-size: 2rem; }
+        }
+
+        /* Notificación flotante */
+        .notification-toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1100;
         }
     </style>
 </head>
@@ -237,7 +152,7 @@ $stats = mysqli_fetch_assoc($stats_result);
         <div class="container">
             <div class="row align-items-center">
                 <div class="col-md-6">
-                    <img src="../../public/assets/img/logo-blanco.png" alt="ENLACE DOS" class="logo">
+                    <img src="<?= $assets_url ?>img/logo-blanco.png" alt="ENLACE DOS" class="logo">
                 </div>
                 <div class="col-md-6 text-md-end">
                     <div class="digital-clock" id="digitalClock"></div>
@@ -248,191 +163,172 @@ $stats = mysqli_fetch_assoc($stats_result);
     </header>
 
     <!-- Contenido Principal -->
-    <main class="main-container">
-        <div class="container">
-            <!-- Turno Actual -->
-            <div class="current-ticket animate__animated animate__fadeIn pulse-effect" id="currentTicket">
-                <h2><i class="fas fa-bell"></i> TURNO ACTUAL</h2>
-                <?php if(mysqli_num_rows($result) > 0): ?>
-                    <?php $current_ticket = mysqli_fetch_assoc($result); ?>
-                    <div class="ticket-number">T-<?php echo str_pad($current_ticket['id'], 4, '0', STR_PAD_LEFT); ?></div>
-                    <div class="ticket-specialty">
-                        <i class="fas fa-user-md"></i> <?php echo $current_ticket['especialidad']; ?>
-                    </div>
-                    <div class="text-muted mt-2">
-                        <?php echo date('H:i', strtotime($current_ticket['fecha_hora'])); ?>
-                    </div>
-                <?php else: ?>
-                    <div class="ticket-number">---</div>
-                    <div class="ticket-specialty">No hay turnos activos</div>
-                <?php endif; ?>
-            </div>
-            
-            <!-- Estadísticas -->
-            <div class="row mb-4">
-                <div class="col-md-3">
-                    <div class="stats-card">
-                        <div class="stats-value"><?php echo $stats['pendientes']; ?></div>
-                        <div class="stats-label">Pendientes</div>
-                    </div>
+    <main class="container py-4">
+        <!-- Turno Actual -->
+        <div class="current-ticket animate__animated animate__fadeIn pulse-animation" id="currentTicket">
+            <h2><i class="fas fa-bell"></i> TURNO ACTUAL</h2>
+            <?php if($current_ticket): ?>
+                <div class="ticket-number">T-<?= str_pad($current_ticket['id'], 4, '0', STR_PAD_LEFT) ?></div>
+                <div class="ticket-specialty">
+                    <i class="fas fa-user-md"></i> <?= $current_ticket['especialidad'] ?>
                 </div>
-                <div class="col-md-3">
-                    <div class="stats-card">
-                        <div class="stats-value"><?php echo $stats['llamados']; ?></div>
-                        <div class="stats-label">Llamados</div>
-                    </div>
+                <div class="text-muted mt-2">
+                    <?= date('H:i', strtotime($current_ticket['fecha_hora'])) ?>
                 </div>
-                <div class="col-md-3">
-                    <div class="stats-card">
-                        <div class="stats-value"><?php echo $stats['atendidos']; ?></div>
-                        <div class="stats-label">Atendidos</div>
-                    </div>
-                </div>
-                <div class="col-md-3">
-                    <div class="stats-card">
-                        <div class="stats-value"><?php echo round($stats['espera_promedio']); ?>'</div>
-                        <div class="stats-label">Espera Promedio</div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Próximos Turnos -->
-            <h3 class="next-tickets-title"><i class="fas fa-list-ol"></i> PRÓXIMOS TURNOS</h3>
-            <div class="row" id="nextTickets">
-                <?php while($ticket = mysqli_fetch_assoc($result)): ?>
+            <?php else: ?>
+                <div class="ticket-number">---</div>
+                <div class="ticket-specialty">No hay turnos activos</div>
+            <?php endif; ?>
+        </div>
+        
+        <!-- Próximos Turnos -->
+        <h3 class="text-white mb-4"><i class="fas fa-list-ol"></i> TURNOS LLAMADOS</h3>
+        <div class="row" id="nextTickets">
+            <?php 
+            if($current_ticket) {
+                // Mostrar los siguientes turnos (ya obtuvimos el primero)
+                while($ticket = mysqli_fetch_assoc($result)): ?>
                     <div class="col-md-4 mb-3">
-                        <div class="ticket-card specialty-<?php echo $ticket['especialidad_id'] % 5 + 1; ?>">
-                            <div class="ticket-id">T-<?php echo $ticket['id']; ?></div>
+                        <div class="ticket-card specialty-<?= $ticket['especialidad_id'] % 5 + 1 ?>">
+                            <div class="ticket-id">T-<?= $ticket['id'] ?></div>
                             <div class="ticket-specialty">
-                                <i class="fas fa-user-md"></i> <?php echo $ticket['especialidad']; ?>
+                                <i class="fas fa-user-md"></i> <?= $ticket['especialidad'] ?>
                             </div>
                             <div class="ticket-time">
-                                <small><?php echo date('H:i', strtotime($ticket['fecha_hora'])); ?></small>
+                                <small><?= date('H:i', strtotime($ticket['fecha_hora'])) ?></small>
                             </div>
                         </div>
                     </div>
-                <?php endwhile; ?>
-                
-                <?php if(mysqli_num_rows($result) === 0): ?>
-                    <div class="col-12">
-                        <div class="alert alert-info">
-                            No hay más turnos en cola
-                        </div>
-                    </div>
-                <?php endif; ?>
-            </div>
-            
-            <!-- Video Promocional -->
-            <div class="video-container">
-                <div class="ratio ratio-16x9">
-                    <iframe src="https://www.youtube.com/embed/VIDEO_ID?autoplay=1&mute=1&loop=1&controls=0" 
-                            allowfullscreen allow="autoplay"></iframe>
-                </div>
+                <?php endwhile;
+            } else {
+                echo '<div class="col-12"><div class="alert alert-info">No hay turnos en cola</div></div>';
+            }
+            ?>
+        </div>
+        
+        <!-- Video Promocional -->
+        <div class="video-container">
+            <div class="ratio ratio-16x9">
+                <video autoplay muted loop playsinline>
+                    <source src="<?= $assets_url ?>videos/promocional.mp4" type="video/mp4">
+                    Tu navegador no soporta el elemento de video.
+                </video>
             </div>
         </div>
     </main>
 
-    <!-- Notificación de nuevo turno -->
-    <div class="alert-notification alert alert-success d-none" id="newTicketAlert">
-        <strong>Nuevo turno llamado!</strong> <span id="newTicketText"></span>
+    <!-- Notificación Toast -->
+    <div class="notification-toast toast align-items-center text-white bg-success border-0 d-none" role="alert" aria-live="assertive" aria-atomic="true" id="liveToast">
+        <div class="d-flex">
+            <div class="toast-body">
+                <i class="fas fa-bell me-2"></i>
+                <span id="toastMessage">Nuevo turno llamado!</span>
+            </div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
     </div>
 
     <!-- Audio para notificaciones -->
-    <audio id="notificationSound" src="../../public/assets/sonidos/notification.mp3"></audio>
+    <audio id="notificationSound" src="<?= $assets_url ?>sonidos/notification.mp3"></audio>
 
     <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js"></script>
     <script>
+        // Variables globales
+        let currentTicketId = <?= $current_ticket ? $current_ticket['id'] : 0 ?>;
+        const toastLiveExample = document.getElementById('liveToast');
+        const toastMessage = document.getElementById('toastMessage');
+        const toastBootstrap = bootstrap.Toast.getOrCreateInstance(toastLiveExample);
+        
         // Reloj en tiempo real
         function updateClock() {
-            var now = new Date();
-            var timeStr = now.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-            var dateStr = now.toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const dateStr = now.toLocaleDateString('es-ES', { 
+                weekday: 'long', 
+                year: 'numeric', 
+                month: 'long', 
+                day: 'numeric' 
+            });
             
-            $('#digitalClock').text(timeStr);
-            $('#currentDate').text(dateStr.charAt(0).toUpperCase() + dateStr.slice(1));
+            document.getElementById('digitalClock').textContent = timeStr;
+            document.getElementById('currentDate').textContent = 
+                dateStr.charAt(0).toUpperCase() + dateStr.slice(1);
         }
         setInterval(updateClock, 1000);
         updateClock();
 
-        // Actualización automática de turnos
-        var lastTicketId = <?php echo isset($current_ticket['id']) ? $current_ticket['id'] : 0; ?>;
-        
-        function checkNewTickets() {
-            $.ajax({
-                url: 'check_new_tickets.php',
-                method: 'GET',
-                dataType: 'json',
-                success: function(data) {
-                    if(data.has_ticket && data.is_new && data.ticket_id !== lastTicketId) {
-                        lastTicketId = data.ticket_id;
-                        showNewTicketNotification(data.ticket_number, data.specialty);
-                        playNotificationSound();
-                        setTimeout(function() {
-                            location.reload();
-                        }, 3000);
-                    }
+        // Función mejorada para verificar nuevos turnos
+        function checkForNewTickets() {
+            const timestamp = new Date().getTime();
+            const url = `<?= $check_tickets_url ?>?last_id=${currentTicketId}&_=${timestamp}`;
+            
+            fetch(url, {
+                headers: {
+                    'Accept': 'application/json'
                 },
-                error: function(xhr, status, error) {
-                    console.log("Error al verificar turnos:", error);
-                    setTimeout(function() {
-                        location.reload();
-                    }, 120000);
+                cache: 'no-store'
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
                 }
+                
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    throw new TypeError("La respuesta no es JSON válido");
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (!data.success) {
+                    throw new Error(data.error || 'Error en la respuesta del servidor');
+                }
+                
+                if (data.has_ticket && data.is_new && data.ticket_id !== currentTicketId) {
+                    currentTicketId = data.ticket_id;
+                    playNotificationSound();
+                    showToastNotification(`Turno ${data.ticket_number} - ${data.specialty}`);
+                    
+                    // Recargar después de 3 segundos para dar tiempo a ver la notificación
+                    setTimeout(() => location.reload(), 3000);
+                }
+            })
+            .catch(error => {
+                console.error('Error al verificar turnos:', error.message);
+                // Reintentar después de 5 segundos en caso de error
+                setTimeout(checkForNewTickets, 5000);
             });
         }
 
-        // Mostrar notificación de nuevo turno
-        function showNewTicketNotification(ticketNumber, specialty) {
-            $('#newTicketText').text('Turno ' + ticketNumber + ' - ' + specialty);
-            $('#newTicketAlert').removeClass('d-none').addClass('animate__animated animate__bounceIn');
+        // Mostrar notificación toast
+        function showToastNotification(message) {
+            toastMessage.textContent = message;
+            toastLiveExample.classList.remove('d-none');
+            toastBootstrap.show();
             
-            setTimeout(function() {
-                $('#newTicketAlert').addClass('animate__animated animate__fadeOutRight');
-                setTimeout(function() {
-                    $('#newTicketAlert').addClass('d-none').removeClass('animate__fadeOutRight');
-                }, 1000);
+            // Ocultar después de 5 segundos
+            setTimeout(() => {
+                toastLiveExample.classList.add('d-none');
             }, 5000);
         }
-        
+
         // Reproducir sonido de notificación
         function playNotificationSound() {
-            var audio = document.getElementById('notificationSound');
+            const audio = document.getElementById('notificationSound');
             audio.currentTime = 0;
-            audio.play().catch(function(e) {
-                console.log("No se pudo reproducir el sonido:", e);
-            });
+            audio.play().catch(e => console.log("Error al reproducir sonido:", e));
         }
-        
-        // Verificar nuevos turnos cada 10 segundos
-        setInterval(checkNewTickets, 10000);
-        
-        // Pantalla completa automática
-        function enterFullscreen() {
-            try {
-                if (!document.fullscreenElement) {
-                    document.documentElement.requestFullscreen().catch(function(e) {
-                        console.log(e);
-                    });
-                }
-            } catch (e) {
-                console.log("Pantalla completa no soportada:", e);
-            }
-        }
-        
-        // Entrar en pantalla completa al cargar
-        $(document).ready(function() {
-            enterFullscreen();
-            $('#currentTicket').addClass('animate__pulse');
-        });
-        
-        // Volver a pantalla completa si el usuario sale
-        document.addEventListener('fullscreenchange', function() {
-            if (!document.fullscreenElement) {
-                enterFullscreen();
-            }
-        });
+
+        // Iniciar verificación de nuevos turnos
+        checkForNewTickets();
+        // Verificar cada 5 segundos
+        setInterval(checkForNewTickets, 5000);
+
+        // Efecto de animación para el turno actual
+        setInterval(() => {
+            document.getElementById('currentTicket').classList.toggle('animate__pulse');
+        }, 3000);
     </script>
 </body>
 </html>
